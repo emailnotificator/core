@@ -87,7 +87,7 @@ extern char* GetNewEmails();
 
 extern void Shutdown();
 
-extern char* GetUnreadList();
+extern void DeleteEmail(char* p0, GoInt p1);
 
 #ifdef __cplusplus
 }

@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,10 +27,22 @@ type MailBox struct {
 	Password string `json:"password"`
 }
 
+type Email struct {
+	Id      int       `json:"id"`
+	Subject string    `json:"subject"`
+	Body    string    `json:"body"`
+	MailBox string    `json:"mail_box"`
+	From    string    `json:"from"`
+	Date    time.Time `json:"date"`
+}
+
+type ByDate []Email
+
 const timeFormat = "02 Jan 15:04"
 
 var config *Config
-var unreadEmails = map[string][]string{}
+
+var unreadEmails = map[string][]Email{}
 var ticker <-chan time.Time
 var closeChan chan bool
 var lastUpdate string
@@ -45,7 +58,7 @@ func init() {
 	}
 	if _, err = os.Stat(cfgDirPath + "/email_checker/settings.json"); os.IsNotExist(err) {
 		if err = os.MkdirAll(cfgDirPath+"/email_checker", 0777); err != nil {
-			log.Println("create cfg dir error:",err)
+			log.Println("create cfg dir error:", err)
 		}
 		if _, err = os.Create(cfgDirPath + "/email_checker/settings.json"); err != nil {
 			log.Println("create cfg file error:", err)
@@ -174,21 +187,52 @@ func Shutdown() {
 	closeChan <- true
 }
 
-//export GetUnreadList
-func GetUnreadList() *C.char {
-	data  := ""
+//export DeleteEmail
+func DeleteEmail(email *C.char, id int) {
+	em := C.GoString(email)
+	delSeq := imap.SeqSet{}
+	delSeq.AddNum(uint32(id))
+	mailBox := MailBox{}
 
-	for box, emails := range unreadEmails {
-		data += box + "\n"
-
-		for i, title := range emails {
-			data += fmt.Sprintf("%d. %s\n", i + 1, title)
+	for _, box := range config.Boxes {
+		if box.Login == em {
+			mailBox = box
 		}
-
-		data += "\n\n"
 	}
 
-	return C.CString(data)
+	operation := imap.FormatFlagsOp(imap.AddFlags, true)
+	flags := []interface{}{imap.DeletedFlag}
+	imapClient, err := client.DialTLS(fmt.Sprintf("%s:%s", mailBox.Host, mailBox.Port), nil)
+
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	// Login
+	defer imapClient.Logout()
+
+	if err = imapClient.Login(mailBox.Login, mailBox.Password); err != nil {
+		log.Println(err)
+		return
+	}
+
+	// List mailboxes
+	// Select INBOX
+	_, err = imapClient.Select("INBOX", false)
+
+	if err != nil {
+		fmt.Println("select box error:", err)
+		return
+	}
+	if err = imapClient.UidStore(&delSeq, operation, flags, nil); err != nil {
+		fmt.Println("IMAP Message Flag Update Failed")
+		fmt.Println(err)
+		return
+	}
+
+	// delete from memory
+	deleteMessage(em, id)
 }
 
 func listener() {
@@ -197,9 +241,12 @@ func listener() {
 		select {
 		case <-ticker:
 			log.Println("check emails")
+			newEmails = make([]string, 0)
+
 			for _, box := range config.Boxes {
 				checkEmails(box)
 			}
+
 			lastUpdate = time.Now().Format(timeFormat)
 		case <-closeChan:
 			log.Println("app close")
@@ -210,7 +257,7 @@ func listener() {
 
 func checkEmails(box MailBox) {
 	if _, ok := unreadEmails[box.Login]; !ok {
-		unreadEmails[box.Login] = []string{}
+		unreadEmails[box.Login] = []Email{}
 	}
 
 	// Connect to server
@@ -237,7 +284,7 @@ func checkEmails(box MailBox) {
 		log.Fatal(err)
 	}
 
-	// Get the last 20 messages
+	// Get the last 50 messages
 	from := uint32(1)
 	to := mbox.Messages
 
@@ -249,35 +296,56 @@ func checkEmails(box MailBox) {
 	seqSet.AddRange(from, to)
 
 	// get unread
-	newEmails = make([]string, 0)
-	unreadEnvelopes := make([]imap.Envelope, 0)
+	unreadEnvelopes := make([]imap.Message, 0)
 	messages := make(chan *imap.Message, 20)
 	done := make(chan error, 1)
 
 	go func() {
-		done <- imapClient.Fetch(seqSet, []imap.FetchItem{imap.FetchEnvelope, imap.FetchFlags}, messages)
+		done <- imapClient.Fetch(seqSet, []imap.FetchItem{
+			imap.FetchEnvelope,
+			imap.FetchFlags,
+			imap.FetchInternalDate,
+			imap.FetchBody,
+			imap.FetchUid,
+		}, messages)
 	}()
 
 	for msg := range messages {
 		if !contains(msg.Flags, `\Seen`) {
-			unreadEnvelopes = append(unreadEnvelopes, *msg.Envelope)
+			unreadEnvelopes = append(unreadEnvelopes, *msg)
 		}
 	}
 	if err = <-done; err != nil {
 		log.Println(err)
 	}
 	for _, envelope := range unreadEnvelopes {
-		if !contains(unreadEmails[box.Login], envelope.Subject) {
-			newEmails = append(newEmails, envelope.Subject)
+		if !containsMsg(unreadEmails[box.Login], envelope) {
+			newEmails = append(newEmails, envelope.Envelope.Subject)
 		}
 	}
 
 	delete(unreadEmails, box.Login)
-	unreadEmails[box.Login] = []string{}
+	msgs := make([]Email, 0, len(unreadEnvelopes))
 
 	for _, envelope := range unreadEnvelopes {
-		unreadEmails[box.Login] = append(unreadEmails[box.Login], envelope.Subject)
+		msg := Email{
+			Id:      int(envelope.Uid),
+			Subject: envelope.Envelope.Subject,
+			Date:    envelope.Envelope.Date,
+			MailBox: box.Login,
+			//Body:    envelope.Body,
+		}
+		if envelope.Envelope.From != nil && len(envelope.Envelope.From) > 0 {
+			msg.From = envelope.Envelope.From[0].Address()
+		}
+
+		msgs = append(msgs, msg)
 	}
+
+	// sort emails
+	sort.Sort(ByDate(msgs))
+	unreadEmails[box.Login] = msgs
+
 }
 
 func contains(data []string, str string) bool {
@@ -291,3 +359,32 @@ func contains(data []string, str string) bool {
 
 	return false
 }
+
+func containsMsg(data []Email, msg imap.Message) bool {
+	uid := int(msg.Uid)
+
+	for _, item := range data {
+		if item.Id == uid {
+			return true
+		}
+	}
+
+	return false
+}
+
+func deleteMessage(login string, id int) {
+	actualMsgs := make([]Email, 0, len(unreadEmails[login]))
+
+	for _, message := range unreadEmails[login] {
+		if message.Id != id {
+			actualMsgs = append(actualMsgs, message)
+		}
+	}
+
+	delete(unreadEmails, login)
+	unreadEmails[login] = actualMsgs
+}
+
+func (a ByDate) Len() int           { return len(a) }
+func (a ByDate) Less(i, j int) bool { return !a[i].Date.Before(a[j].Date) }
+func (a ByDate) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
