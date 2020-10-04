@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
+	"github.com/emersion/go-message/mail"
 )
 import "C"
 
@@ -85,13 +87,6 @@ func init() {
 }
 
 func main() {
-	Setup()
-
-	for _, box := range config.Boxes {
-		checkEmails(box)
-	}
-
-	Shutdown()
 }
 
 //export Setup
@@ -280,10 +275,6 @@ func listener() {
 }
 
 func checkEmails(box MailBox) {
-	//if _, ok := unreadEmails[box.Login]; !ok {
-	//	unreadEmails[box.Login] = []Email{}
-	//}
-
 	// Connect to server
 	imapClient, err := client.DialTLS(fmt.Sprintf("%s:%s", box.Host, box.Port), nil)
 
@@ -323,13 +314,17 @@ func checkEmails(box MailBox) {
 	unreadEnvelopes := make([]imap.Message, 0)
 	messages := make(chan *imap.Message, 20)
 	done := make(chan error, 1)
+	fetchSection := imap.BodySectionName{
+		Peek: true,
+	}
 
 	go func() {
+		//done <- imapClient.Fetch(seqSet, []imap.FetchItem{imap.FetchFull}, messages)
 		done <- imapClient.Fetch(seqSet, []imap.FetchItem{
+			fetchSection.FetchItem(),
 			imap.FetchEnvelope,
 			imap.FetchFlags,
 			imap.FetchInternalDate,
-			imap.FetchBody,
 			imap.FetchUid,
 		}, messages)
 	}()
@@ -340,28 +335,59 @@ func checkEmails(box MailBox) {
 		}
 	}
 	if err = <-done; err != nil {
-		log.Println(err)
-	}
-	for _, envelope := range unreadEnvelopes {
-		if !containsMsg(unreadEmails[box.Login], envelope) {
-			newEmails = append(newEmails, envelope.Envelope.Subject)
-		}
+		log.Println("done error:", err)
 	}
 
 	delete(unreadEmails, box.Login)
 	msgs := make([]Email, 0, len(unreadEnvelopes))
 
 	for _, envelope := range unreadEnvelopes {
-		//envelope.GetBody()
+		var section imap.BodySectionName
+		bodyReader := envelope.GetBody(&section)
 		msg := Email{
 			Id:      int(envelope.Uid),
 			Subject: envelope.Envelope.Subject,
 			Date:    envelope.Envelope.Date,
 			MailBox: box.Login,
-			//Body:    envelope.Body,
 		}
+
 		if envelope.Envelope.From != nil && len(envelope.Envelope.From) > 0 {
-			msg.From = envelope.Envelope.From[0].Address()
+			from := envelope.Envelope.From[0]
+			msg.From = from.PersonalName + " | " + from.Address()
+		}
+		if bodyReader != nil {
+			// read mail body
+			mr, err := mail.CreateReader(bodyReader)
+
+			if err != nil {
+				log.Println("create msg reader error:", err)
+			}
+			for {
+				part, err := mr.NextPart()
+
+				if err == io.EOF {
+					break
+				} else if err != nil {
+					log.Println("read next part error:", err)
+					continue
+				}
+				switch partHeader := part.Header.(type) {
+				case *mail.InlineHeader:
+					// This is the message's text (can be plain-text or HTML)
+					body, err := ioutil.ReadAll(part.Body)
+
+					if err != nil {
+						log.Println("read mail body error:", err)
+					}
+
+					msg.Body = fmt.Sprintf("%v", string(body))
+				case *mail.AttachmentHeader:
+					// This is an attachment
+					filename, _ := partHeader.Filename()
+
+					log.Printf("Got attachment: %v", filename)
+				}
+			}
 		}
 
 		msgs = append(msgs, msg)
