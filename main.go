@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"log"
-	"sort"
 	"time"
 
 	"checker_core/client"
@@ -14,9 +13,11 @@ import "C"
 
 const timeFormat = "02 Jan 15:04"
 
-var closeChan chan bool
-var lastUpdate string
-var isSetup = false
+var (
+	closeChan  chan bool
+	lastUpdate string
+	isSetup    = false
+)
 
 func init() {
 	if err := model.InitConfig(); err != nil {
@@ -52,27 +53,12 @@ func IsSetup() bool {
 
 //export GetUnread
 func GetUnread() *C.char {
-	unread := make([]model.Email, 0, GetUnreadCount())
-
-	for _, value := range model.UnreadEmails {
-		unread = append(unread, value...)
-	}
-
-	sort.Sort(model.ByDate(unread))
-	data, _ := json.Marshal(unread)
-
-	return C.CString(string(data))
+	return toCString(model.UnreadMails.All())
 }
 
 //export GetUnreadCount
 func GetUnreadCount() int {
-	cnt := 0
-
-	for _, mails := range model.UnreadEmails {
-		cnt += len(mails)
-	}
-
-	return cnt
+	return model.UnreadMails.Count()
 }
 
 //export GetLastUpdate
@@ -87,15 +73,15 @@ func SetConfig(data *C.char) {
 
 //export GetConfig
 func GetConfig() *C.char {
-	data, _ := json.Marshal(model.AppConfig)
-	return C.CString(string(data))
+	return toCString(model.AppConfig)
 }
 
 //export GetNewEmails
 func GetNewEmails() *C.char {
-	data, _ := json.Marshal(model.NewEmails)
-	model.NewEmails = []string{}
-	return C.CString(string(data))
+	cString := toCString(model.NewEmails)
+	model.NewEmails = []string{} // clear new email because frontend now know about it
+
+	return cString
 }
 
 //export Shutdown
@@ -105,16 +91,14 @@ func Shutdown() {
 
 //export DeleteEmail
 func DeleteEmail(email *C.char, id int) {
-	em := C.GoString(email)
-
-	client.DeleteEmail(model.AppConfig, em, id)
+	item := C.GoString(email)
+	client.DeleteEmail(model.AppConfig, item, id)
 }
 
 //export SetSeen
 func SetSeen(email *C.char, id int) {
-	em := C.GoString(email)
-
-	client.SetSeen(model.AppConfig, em, id)
+	item := C.GoString(email)
+	client.SetSeen(model.AppConfig, item, id)
 }
 
 func listener() {
@@ -131,8 +115,19 @@ func listener() {
 
 			lastUpdate = time.Now().Format(timeFormat)
 		case <-closeChan:
-			log.Println("app close")
+			log.Println("app shutdown")
+			close(closeChan)
 			return
 		}
 	}
+}
+
+func toCString(data interface{}) *C.char {
+	jsonBytes, err := json.Marshal(data)
+	if err != nil {
+		log.Println("marshal to CString error:", err)
+		data = []byte("")
+	}
+
+	return C.CString(string(jsonBytes))
 }

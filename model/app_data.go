@@ -5,22 +5,52 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"sort"
 	"time"
 )
 
-var UnreadEmails = map[string][]Email{}
-var AppConfig *Config
-var NewEmails = make([]string, 0)
-var CheckTime = 0
-var Ticker <-chan time.Time
+var (
+	UnreadMails = UnreadEmails{}
+	AppConfig   *Config
+	NewEmails   = make([]string, 0)
+	CheckTime   = 0
+	Ticker      <-chan time.Time
+)
+
+type UnreadEmails struct {
+	EmailMap map[string][]Email
+}
+
+func (um *UnreadEmails) Count() int {
+	cnt := 0
+
+	for _, mails := range um.EmailMap {
+		cnt += len(mails)
+	}
+
+	return cnt
+}
+
+func (um *UnreadEmails) All() []Email {
+	unread := make([]Email, 0, um.Count())
+
+	for _, value := range um.EmailMap {
+		unread = append(unread, value...)
+	}
+
+	sort.Sort(ByDate(unread))
+
+	return unread
+}
 
 func InitConfig() error {
 	cfgDirPath, err := os.UserConfigDir()
-
 	if err != nil {
 		log.Println("get user config dir error:", err)
 		return err
 	}
+
+	// create directory and file if it is not exists
 	if _, err = os.Stat(cfgDirPath + "/email_checker/settings.json"); os.IsNotExist(err) {
 		if err = os.MkdirAll(cfgDirPath+"/email_checker", 0777); err != nil {
 			log.Println("create cfg dir error:", err)
@@ -30,8 +60,8 @@ func InitConfig() error {
 		}
 	}
 
+	// read config and create settings object
 	bytes, err := ioutil.ReadFile(cfgDirPath + "/email_checker/settings.json")
-
 	if err != nil {
 		log.Println("Read model.AppConfig file error")
 		return err
@@ -43,9 +73,11 @@ func InitConfig() error {
 		log.Println("unmarshal AppConfig file error: " + err.Error())
 		return err
 	}
+
 	if AppConfig.CheckPeriod == 0 {
 		AppConfig.CheckPeriod = 5
 	}
+
 	if AppConfig.Boxes == nil {
 		AppConfig.Boxes = make([]MailBox, 0)
 	}

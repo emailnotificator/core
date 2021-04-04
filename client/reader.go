@@ -14,10 +14,12 @@ import (
 	"github.com/emersion/go-message/mail"
 )
 
+const messageCount = 50
+
 func GetEmails(box model.MailBox) []model.Email {
 	emails := make([]model.Email, 0)
-	imapClient, err := GetConnect(box)
 
+	imapClient, err := GetConnect(box)
 	if err != nil {
 		log.Println("get connect error:", err)
 		return emails
@@ -38,8 +40,8 @@ func GetEmails(box model.MailBox) []model.Email {
 	from := uint32(1)
 	to := mbox.Messages
 
-	if mbox.Messages > 50 {
-		from = mbox.Messages - 50
+	if mbox.Messages > messageCount {
+		from = mbox.Messages - messageCount
 	}
 
 	seqSet := new(imap.SeqSet)
@@ -53,6 +55,7 @@ func GetEmails(box model.MailBox) []model.Email {
 		Peek: true,
 	}
 
+	// fetch from email box
 	go func() {
 		done <- imapClient.Fetch(seqSet, []imap.FetchItem{
 			fetchSection.FetchItem(),
@@ -63,11 +66,13 @@ func GetEmails(box model.MailBox) []model.Email {
 		}, messages)
 	}()
 
+	// todo: get seen only or all set to config
 	for msg := range messages {
 		if !util.ContainsString(msg.Flags, `\Seen`) {
 			unreadEnvelopes = append(unreadEnvelopes, *msg)
 		}
 	}
+
 	if err = <-done; err != nil {
 		log.Println("done error:", err)
 	}
@@ -89,6 +94,7 @@ func GetEmails(box model.MailBox) []model.Email {
 			from := envelope.Envelope.From[0]
 			msg.From = from.PersonalName + " | " + from.Address()
 		}
+
 		if bodyReader != nil {
 			// read mail body
 			msg.Body = getBody(bodyReader)
@@ -99,25 +105,28 @@ func GetEmails(box model.MailBox) []model.Email {
 
 	// sort emails
 	sort.Sort(model.ByDate(msgs))
+
 	return msgs
 }
 
 func getBody(bodyReader io.Reader) string {
-	mr, err := mail.CreateReader(bodyReader)
-
+	mailReader, err := mail.CreateReader(bodyReader)
 	if err != nil {
 		log.Println("create msg reader error:", err)
 		return ""
 	}
-	for {
-		part, err := mr.NextPart()
 
+	for {
+		part, err := mailReader.NextPart()
 		if err == io.EOF {
 			break
-		} else if err != nil {
+		}
+
+		if err != nil {
 			log.Println("read next part error:", err)
 			continue
 		}
+
 		switch partHeader := part.Header.(type) {
 		case *mail.InlineHeader:
 			// This is the message's text (can be plain-text or HTML)
@@ -131,7 +140,10 @@ func getBody(bodyReader io.Reader) string {
 			return fmt.Sprintf("%v", string(body))
 		case *mail.AttachmentHeader:
 			// This is an attachment
-			filename, _ := partHeader.Filename()
+			filename, err := partHeader.Filename()
+			if err != nil {
+				log.Println("get attachment file name error:", err)
+			}
 
 			log.Printf("Got attachment: %v", filename)
 		}
@@ -145,13 +157,13 @@ func CheckEmails(box model.MailBox) {
 
 	if len(emails) != 0 {
 		for _, email := range emails {
-			if !containsMsg(model.UnreadEmails[box.Login], email) {
+			if !containsMsg(model.UnreadMails.EmailMap[box.Login], email) {
 				model.NewEmails = append(model.NewEmails, email.Subject)
 			}
 		}
 	}
 
-	model.UnreadEmails[box.Login] = emails
+	model.UnreadMails.EmailMap[box.Login] = emails
 }
 
 func containsMsg(data []model.Email, msg model.Email) bool {

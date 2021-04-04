@@ -30,14 +30,14 @@ func SetSeen(cfg *model.Config, email string, id int) {
 }
 
 func deleteMessage(login string, id int) {
-	actualMsgs := make([]model.Email, 0)
+	actualMsgs := make([]model.Email, 0, len(model.UnreadMails.EmailMap[login]))
 
-	for _, message := range model.UnreadEmails[login] {
+	for _, message := range model.UnreadMails.EmailMap[login] {
 		if message.Id != id {
 			actualMsgs = append(actualMsgs, message)
 		}
 	}
 
-	delete(model.UnreadEmails, login)
-	model.UnreadEmails[login] = actualMsgs
+	delete(model.UnreadMails.EmailMap, login)
+	model.UnreadMails.EmailMap[login] = actualMsgs
 }
