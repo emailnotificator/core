@@ -16,5 +16,7 @@
 
 
 # CUSTOM
+.*
 *.a
-libcore.h
+*.h
+!.gitignore
