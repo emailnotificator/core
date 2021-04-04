@@ -105,6 +105,7 @@ func listener() {
 	log.Println("start listener")
 	for {
 		select {
+		// period for check new emails in remote boxes
 		case <-model.Ticker:
 			log.Println("check emails")
 			model.NewEmails = make([]string, 0)
@@ -114,6 +115,7 @@ func listener() {
 			}
 
 			lastUpdate = time.Now().Format(timeFormat)
+		// shutdown application
 		case <-closeChan:
 			log.Println("app shutdown")
 			close(closeChan)
@@ -122,6 +124,7 @@ func listener() {
 	}
 }
 
+// toCString convert any struct to C-style json string
 func toCString(data interface{}) *C.char {
 	jsonBytes, err := json.Marshal(data)
 	if err != nil {

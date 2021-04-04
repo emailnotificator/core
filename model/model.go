@@ -2,11 +2,13 @@ package model
 
 import "time"
 
+// Config struct for application configuration
 type Config struct {
 	CheckPeriod int       `json:"check_period"`
 	Boxes       []MailBox `json:"boxes"`
 }
 
+// MailBox struct for settings email box
 type MailBox struct {
 	Host     string `json:"host"`
 	Port     string `json:"port"`
@@ -14,6 +16,7 @@ type MailBox struct {
 	Password string `json:"password"`
 }
 
+// Email struct for email data
 type Email struct {
 	Id      int       `json:"id"`
 	Subject string    `json:"subject"`
@@ -23,6 +26,7 @@ type Email struct {
 	Date    time.Time `json:"date"`
 }
 
+// ByDate implements sort.Interface based on the Email.Date field (DESC)
 type ByDate []Email
 
 func (a ByDate) Len() int           { return len(a) }

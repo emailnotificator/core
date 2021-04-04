@@ -10,6 +10,7 @@ import (
 	"github.com/emersion/go-imap/client"
 )
 
+// GetConnect return client with connection to concrete email box
 func GetConnect(mailBox model.MailBox) (*client.Client, error) {
 	imapClient, err := client.DialTLS(fmt.Sprintf("%s:%s", mailBox.Host, mailBox.Port), nil)
 	if err != nil {
@@ -25,7 +26,9 @@ func GetConnect(mailBox model.MailBox) (*client.Client, error) {
 	return imapClient, nil
 }
 
+// SetFlag set flag for email
 func SetFlag(cfg *model.Config, email string, id int, actionFlag string) error {
+	// get needed box
 	mailBox := model.MailBox{}
 
 	for _, box := range cfg.Boxes {
@@ -39,6 +42,7 @@ func SetFlag(cfg *model.Config, email string, id int, actionFlag string) error {
 		return fmt.Errorf("not found %s box", email)
 	}
 
+	// set flag for email by email id
 	if err := setFlag(mailBox, id, []interface{}{actionFlag}); err != nil {
 		log.Println("set flag error:", err)
 		return err
@@ -47,6 +51,7 @@ func SetFlag(cfg *model.Config, email string, id int, actionFlag string) error {
 	return nil
 }
 
+// setFlag set flag for email by email id and send in to remote email box
 func setFlag(mailBox model.MailBox, id int, flags []interface{}) error {
 	delSeq := imap.SeqSet{}
 	delSeq.AddNum(uint32(id))

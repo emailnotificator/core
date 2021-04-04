@@ -17,10 +17,12 @@ var (
 	Ticker      <-chan time.Time
 )
 
+// UnreadEmails struct for work with unread emails
 type UnreadEmails struct {
 	EmailMap map[string][]Email
 }
 
+// Count return count emails from all boxes
 func (um *UnreadEmails) Count() int {
 	cnt := 0
 
@@ -31,6 +33,7 @@ func (um *UnreadEmails) Count() int {
 	return cnt
 }
 
+// All return email list sorting by date (desc) from all boxes
 func (um *UnreadEmails) All() []Email {
 	unread := make([]Email, 0, um.Count())
 
@@ -43,6 +46,7 @@ func (um *UnreadEmails) All() []Email {
 	return unread
 }
 
+// InitConfig create config object and file if is it needed
 func InitConfig() error {
 	cfgDirPath, err := os.UserConfigDir()
 	if err != nil {

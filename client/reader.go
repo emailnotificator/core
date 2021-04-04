@@ -16,6 +16,7 @@ import (
 
 const messageCount = 50
 
+// GetEmails return unreaded emails from remote email box
 func GetEmails(box model.MailBox) []model.Email {
 	emails := make([]model.Email, 0)
 
@@ -109,6 +110,7 @@ func GetEmails(box model.MailBox) []model.Email {
 	return msgs
 }
 
+// getBody return email body as string
 func getBody(bodyReader io.Reader) string {
 	mailReader, err := mail.CreateReader(bodyReader)
 	if err != nil {
@@ -152,6 +154,7 @@ func getBody(bodyReader io.Reader) string {
 	return ""
 }
 
+// CheckEmails get new emails from remote email box
 func CheckEmails(box model.MailBox) {
 	emails := GetEmails(box)
 
@@ -166,6 +169,7 @@ func CheckEmails(box model.MailBox) {
 	model.UnreadMails.EmailMap[box.Login] = emails
 }
 
+// containsMsg return exist or not exist email in application email list
 func containsMsg(data []model.Email, msg model.Email) bool {
 	for _, item := range data {
 		if item.Id == msg.Id {

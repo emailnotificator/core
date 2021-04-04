@@ -12,6 +12,7 @@ import (
 	"checker_core/model"
 )
 
+// ContainsString return contains or not contains string in string slice
 func ContainsString(data []string, str string) bool {
 	str = strings.ToLower(str)
 
@@ -24,6 +25,8 @@ func ContainsString(data []string, str string) bool {
 	return false
 }
 
+// UpdateConfig set new data to application configuration object
+// and write it to configuration file
 func UpdateConfig(strData string) {
 	// unmarshal json to config struct
 	if err := json.Unmarshal([]byte(strData), model.AppConfig); err != nil {
